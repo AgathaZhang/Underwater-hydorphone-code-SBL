@@ -42,6 +42,8 @@ class SonarData(object):
 
 
 class Sonar:
+    def __init__(self):
+        print('this is Father class Sonar')
     # 基本属性
     _data = SonarData()
     _pyaudio = None  # 音频设备
@@ -72,33 +74,36 @@ class Sonar:
     _parse_gps_failed_times = 0  # gps解析失败次数
 
     # 初始化函数
+    '''由data init调用:'''
     def init(self,  channel=2, rate=192000, format=pyaudio.paInt16, times_pre_second=2, ):
-        self._channel = channel
-        self._rate = rate
-        self._format = format
-        self._chunk = int(rate / times_pre_second)
-        self._times_pre_second = times_pre_second
+        self._channel = channel                         # 声道数
+        self._rate = rate                               # 采样率
+        self._format = format                           # 数据格式 16bit
+        self._chunk = int(rate / times_pre_second)      # 音频流缓冲区大小
+        self._times_pre_second = times_pre_second       # 每秒标识信号出现次数
+
 
         # 带通滤波器参数  // 192khz 34khz-36khz  // WN = fc1 / fa; (fa = fs / 2)
         _bp_hz = 35000  # 特征信号频率 khz
         _bp_low = (_bp_hz - 1000) / (self._rate / 2)
         _bp_up = (_bp_hz + 1000) / (self._rate / 2)
-        _bp_b, _bp_a = signal.butter(8, [_bp_low, _bp_up], 'bandpass')
+        _bp_b, _bp_a = signal.butter(8, [_bp_low, _bp_up], 'bandpass')      # 返回滤波器分子分母形式 分子b 分母a
         self._bp_b = _bp_b
         self._bp_a = _bp_a
 
         # 创建队列和线程，队列和线程的数量和声道数有关
-        for i in range(self._channel):
-            _q = queue.Queue(maxsize=1024)
-            self._channel_data_queue.append(_q)
+        for i in range(self._channel):                      # 有两通道，所以有两线程
+            _q = queue.Queue(maxsize=1024)                  # 创建私有队列
+            self._channel_data_queue.append(_q)             # _channel_data_queue = []  # 声道数据队列已经初始化
 
             t = threading.Thread(
                 target=self._handle_data, name="sonar_audio_"+str(i),
-                args=(i, ))
+                args=(i, ))                                 # 实例化线程                                                     question 这里的args=(i,)含义
             t.start()
-            self._threads.append(t)
+            self._threads.append(t)                         # _threads = []  # 线程池
 
         # 打开音频设备
+        '''这里是Linux硬件声卡的调度 包含于Sonar.init()当中'''
         self._pyaudio = pyaudio.PyAudio()
         info = self._pyaudio.get_host_api_info_by_index(0)
         numdevices = info.get('deviceCount')
@@ -125,23 +130,23 @@ class Sonar:
 
     def _run(self):
         while True:
-            if not self._pyaudio_ok:
-                if not self._connect():
-                    time.sleep(5)
+            if not self._pyaudio_ok:            # init False
+                if not self._connect():         # 执行_connect() 并return ture
+                    time.sleep(5)               # 线程等待5s
             else:
-                self._read()
+                self._read()                    # _connect成功了 就执行read
 
     def _run_calc(self):
-        _unwork_datas = {}
-        _pre_point_time = 1 / self._rate
+        _unwork_datas = {}                   #含义
+        _pre_point_time = 1 / self._rate     #含义
         _voice_speed = 1500  # 海水中的音速
-        dis_filter_count = 10
+        dis_filter_count = 10                #含义
         follow_dis_list = np.zeros((dis_filter_count), dtype=np.int32)  # 跟随的距离
         follow_dis_list_index = 0
 
         while True:
             # 从队列中获取音频数据，阻塞操作
-            _res = self._channel_res_queue.get(1)
+            _res = self._channel_res_queue.get(1)           # 一直阻塞 等同于 (block=True, timeout=None)
 
             # 获取声纳水听器数据
             _channel_id, _data_id, _val_index, _val, _follow_val_index, _follow_val, _gps_time = _res.get_info()
@@ -149,7 +154,7 @@ class Sonar:
             # 计算距离
             # 整合所有声道数据
             if _data_id not in _unwork_datas:
-                _unwork_datas[_data_id] = [Result(), Result()]
+                _unwork_datas[_data_id] = [Result(), Result()]        # 这里要明确含义
 
             # 存储
             _data_id_datas = _unwork_datas[_data_id]
@@ -224,14 +229,14 @@ class Sonar:
                 frames_per_buffer=self._chunk,
                 input=True,
                 input_device_index=self._device_id,)
-        except Exception as e:
+        except Exception as e:                  # 错误类型抛给别名e 打印出来
             print("Sonar _connect open error. err=%s, channel=%d" %
                   (str(e), self._channel))
 
-            return False
+            return False        # 两个return同为一个吗
 
-        self._pyaudio_ok = True
-        return True
+        self._pyaudio_ok = True     # 这里设备只检验一次 是否有问题
+        return True     # 两个return同为一个吗
 
     def _read(self):
         _times = 0
