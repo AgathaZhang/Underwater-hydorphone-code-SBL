@@ -42,8 +42,8 @@ class SonarData(object):
 
 
 class Sonar:
-    def __init__(self):
-        print('this is Father class Sonar')
+    # def __init__(self):
+    #     print('this is Father class Sonar')
     # 基本属性
     _data = SonarData()
     _pyaudio = None  # 音频设备
@@ -220,6 +220,7 @@ class Sonar:
                 # print("[DISTANCE] time=%.2f, val_index_1=%d, val_index_2=%d, val_1=%d, val_2=%d, dis=%d[%.2f], follow_dis=%d" %
                 #       (time.time(), val_index_1, val_index_2, val_1, val_2, dis, _dis, follow_dis))
 
+    '''判断是否连接成功开始收包'''
     def _connect(self):
         try:
             self._stream = self._pyaudio.open(
@@ -233,15 +234,15 @@ class Sonar:
             print("Sonar _connect open error. err=%s, channel=%d" %
                   (str(e), self._channel))
 
-            return False        # 两个return同为一个吗
+            return False        # return1
 
         self._pyaudio_ok = True     # 这里设备只检验一次 是否有问题
-        return True     # 两个return同为一个吗
+        return True     # return2
 
     def _read(self):
         _times = 0
-        _channel_byte_count = self._chunk * 2
-        _all_channel_byte_count = _channel_byte_count * self._channel
+        _channel_byte_count = self._chunk * 2       # _chunk音频流缓冲区大小
+        _all_channel_byte_count = _channel_byte_count * self._channel           # _channel声道数
 
         plt.ion()  # 开启一个画图的窗口
         _st = time.time()
