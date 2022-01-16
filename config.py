@@ -118,7 +118,7 @@ class Sonar(object):
                   (self.read_step))
             return
 
-        self.read_step = read_step
+        self.read_step = read_step      # 先后顺序
 
     def set_save_wav_second(self, second):
         if second <= 0:

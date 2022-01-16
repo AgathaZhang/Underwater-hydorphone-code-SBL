@@ -47,6 +47,7 @@ class SonarData(object):
 class Sonar:
 
     # 基本属性
+    _read_end = 1 # 音频样本帧是否全导入队列标志位
     _data = SonarData()
     _pyaudio = None  # 音频设备
     _pyaudio_ok = False  # 音频设备是否就绪
@@ -74,6 +75,7 @@ class Sonar:
     _auto_step_times = 0  # 自动步进次数
     _parse_gps_ok_times = 0  # gps解析成功次数
     _parse_gps_failed_times = 0  # gps解析失败次数
+    _draw_que = queue.Queue(maxsize=1024)
 
 
     # 初始化函数
@@ -103,6 +105,7 @@ class Sonar:
             t.start()
             self._threads.append(t)  # _threads = []  # 线程池
 
+
         # 打开音频设备
         '''这里是Linux硬件声卡的调度 包含于Sonar.init()当中'''
         # self._pyaudio = pyaudio.PyAudio()
@@ -127,16 +130,48 @@ class Sonar:
             target=self._run_calc, name="sonar_run_calc", args=())
         _sonar_run_calc_thread.start()
 
+        # 启动画图线程
+        _sonar_draw_thread = threading.Thread(
+            target=self._run_draw, name="sonar_draw", args=())
+        _sonar_draw_thread.start()
+
         return True
+
+    def _run_draw(self):
+        while True:       # 用个flag标志队列是否取空了
+            picture_data = self._draw_que.get()
+            origin = picture_data._src_data  # 原始数据
+            bandpass = picture_data._bp_data  # 带通之后的
+            envelope = picture_data._uphil_bp_data  # 包络之后的
+            overlay = picture_data._overlay_data  # 十次包络后的
+
+            # plt.figure(1)
+            plt.subplot(4, 1, 1)
+            # time 也是一个数组，与wave_data[0]或wave_data[1]配对形成系列点坐标
+            plt.plot(range(0,96000), origin)
+            plt.subplot(4, 1, 2)
+            plt.plot(range(0,96000), bandpass, c="r")
+            plt.subplot(4, 1, 3)
+            plt.plot(range(0, 96000), envelope, c="m")
+            plt.subplot(4, 1, 4)
+            plt.plot(range(0, 96000), overlay, c="y")
+            plt.xlabel("time")
+            plt.show()
+            time.sleep(5)
+
+
 
     '''这里把检测connect屏蔽掉'''
     def _run(self):
-        while True:
+        while (self._read_end):
+        # while True:
             # if not self._pyaudio_ok:  # init False
             #     if not self._connect():  # 执行_connect() 并return ture
             #         time.sleep(5)  # 线程等待5s
             # else:
                 self._read()  # _connect成功了 就执行read
+        print("音频样本已全部导入")
+        # 在这里关读音频线程？
 
     def _run_calc(self):
         _unwork_datas = {}  # 含义
@@ -263,60 +298,43 @@ class Sonar:
         wave_data = np.frombuffer(str_data, dtype='int16')  # 将声音文件数据转换为数组矩阵形式
         wave_data.shape = -1, num_channel  # 按照声道数将数组整形，单声道时候是一列数组，双声道时候是两列的矩阵
         wave_data = wave_data.T  # 将矩阵转置
-        signal_length = len(wave_data[0])  # 信号总长度
+        # signal_length = len(wave_data[0])  # 信号总长度
         # time = np.arange(0, signal_length) / (framerate*8)   # 时域每周期长度为半秒
-        time = np.arange(0, 96000)
-        time = list(time)
+        # time = np.arange(0, 96000)
+        # time = list(time)
         # time = 1/192000
         period = 96000                      # 半秒钟一个发射周期
         data_start_index = 0
-
-
-        # 丢进画图线程
-        # for i in range(num_channel):  # 有两通道，所以有两线程
-        #     _figure = queue.Queue(maxsize=1024)  # 创建私有队列
-        #     self._channel_data_queue.append(_figure)  # _channel_data_queue = []  # 声道数据队列已经初始化
-        #
-        #     t = threading.Thread(
-        #         target=self._handle_data, name="sonar_realtim_plot" + str(i),
-        #         args=(i,))  # 实例化线程                         question 这里的args=(i,)含义
-        #     t.start()
-        #     self._threads.append(t)                         # _threads = []  # 线程池
-
-
-
-
-
-
+        A = wave_data
 
         # for i in range(int(signal_length)/period):
-
-
-
-
-
         for i in range(0, 360):
             data_start_index = data_start_index + 9600 * i
             data_end_index = data_start_index + period
             data_realtime_audio = list(wave_data[0,data_start_index:data_end_index])
-
             data_realtime_pps = list(wave_data[1, data_start_index:data_end_index])
-            plt.figure(1)
-            plt.subplot(2, 1, 1)
-            # time 也是一个数组，与wave_data[0]或wave_data[1]配对形成系列点坐标
-            plt.plot(time, data_realtime_audio)
-            plt.subplot(2, 1, 2)
-            plt.plot(time, data_realtime_pps, c="r")
-            plt.xlabel("time")
-            plt.show()
+            self._channel_data_queue[0].put(data_realtime_audio)
+            self._channel_data_queue[1].put(data_realtime_pps)
+        self._read_end = 0
+
+
+
+            # plt.figure(1)
+            # plt.subplot(2, 1, 1)
+            # # time 也是一个数组，与wave_data[0]或wave_data[1]配对形成系列点坐标
+            # plt.plot(time, data_realtime_audio)
+            # plt.subplot(2, 1, 2)
+            # plt.plot(time, data_realtime_pps, c="r")
+            # plt.xlabel("time")
+            # plt.show()
 
 
 
 
-        plt.ion()  # 开启一个画图的窗口
-        _st = time.time()
-        while True:
-            try:
+        # plt.ion()  # 开启一个画图的窗口
+        # _st = time.time()
+        # while True:
+        #     try:
                 # # 读音频流是否要步进
                 # if configIns.sonar.read_step > 0:
                 #     _chunk = int(self._chunk * configIns.sonar.read_step)
@@ -354,79 +372,82 @@ class Sonar:
                 #             _sonar_write_wav_file_thread.start()
 
                 # 读取设备音频流
-                _data = self._stream.read(
-                    self._chunk, exception_on_overflow=False)
+                # _data = self._stream.read(
+                #     self._chunk, exception_on_overflow=False)
 
                 # 长度校验
-                _data_len = len(_data)
-                if _data_len != _all_channel_byte_count:
-                    print("Sonar run read error. data_len=%d, byte_count=%d" %
-                          (_data_len, _all_channel_byte_count))
+                # _data_len = len(_data)
+                # if _data_len != _all_channel_byte_count:
+                #     print("Sonar run read error. data_len=%d, byte_count=%d" %
+                #           (_data_len, _all_channel_byte_count))
 
                 # 计数+1
-                _times += 1
+                # _times += 1
 
-                # 过滤起始的音频(有干扰)
-                if _times < 10:
-                    continue
-
-                # 解析数据
-                _src_data = np.zeros(self._chunk, dtype=np.int16)
-                _np_data = np.array(_data)
-                _tmp_np_data_file_name = 'tmp_np_data.dat'
-                with open(_tmp_np_data_file_name, 'wb+') as fs:
-                    _np_data.tofile(_tmp_np_data_file_name)
-                    _src_data = np.fromfile(
-                        _tmp_np_data_file_name, dtype=np.int16)
+                # # 过滤起始的音频(有干扰)
+                # if _times < 10:
+                #     continue
+                #
+                # # 解析数据
+                # _src_data = np.zeros(self._chunk, dtype=np.int16)
+                # _np_data = np.array(_data)
+                # _tmp_np_data_file_name = 'tmp_np_data.dat'
+                # with open(_tmp_np_data_file_name, 'wb+') as fs:
+                #     _np_data.tofile(_tmp_np_data_file_name)
+                #     _src_data = np.fromfile(
+                #         _tmp_np_data_file_name, dtype=np.int16)
 
                 #  画图
-                if False:
-                    plt.clf()
-                    plt.subplot(211)
-                    plt.plot(_src_data[0::self._channel])
-                    plt.subplot(212)
-                    plt.plot(_src_data[1::self._channel])
-                    plt.pause(0.01)
-                    plt.ioff()
-                    continue
+                # if False:
+                #     plt.clf()
+                #     plt.subplot(211)
+                #     plt.plot(_src_data[0::self._channel])
+                #     plt.subplot(212)
+                #     plt.plot(_src_data[1::self._channel])
+                #     plt.pause(0.01)
+                #     plt.ioff()
+                #     continue
 
-                # 写文件
-                if configIns.sonar.save_wav_second > 0:
-                    self._frames.append(_data)
-                    configIns.sonar.save_wav_second -= 1
-                    if configIns.sonar.save_wav_second == 0:
-                        # 启动声纳run线程
-                        _sonar_write_wav_file_thread = threading.Thread(
-                            target=self._write_wav_file, name="sonar_write_wav_file", args=())
-                        _sonar_write_wav_file_thread.start()
+                # # 写文件
+                # if configIns.sonar.save_wav_second > 0:
+                #     self._frames.append(_data)
+                #     configIns.sonar.save_wav_second -= 1
+                #     if configIns.sonar.save_wav_second == 0:
+                #         # 启动声纳run线程
+                #         _sonar_write_wav_file_thread = threading.Thread(
+                #             target=self._write_wav_file, name="sonar_write_wav_file", args=())
+                #         _sonar_write_wav_file_thread.start()
 
-                # 双声道数据
-                channel_data_1 = _src_data[0::2]  # 声道1 水听器
-                channel_data_2 = _src_data[1::2]  # 声道2 GPS
 
-                # 检测是否需要步进
-                step = self._check_need_setp(channel_data_2)
-                if step != 0:
-                    print("need step. step=%d" % (step))
-                    if step > 0:
-                        self._auto_step_chunk = step
+            #     _src_data = wave_data
+            #     # 双声道数据
+            #     channel_data_1 = _src_data[0::2]  # 声道1 水听器
+            #     channel_data_2 = _src_data[1::2]  # 声道2 GPS
+            #
+            #     # 检测是否需要步进
+            #     step = self._check_need_setp(channel_data_2)
+            #     if step != 0:
+            #         print("need step. step=%d" % (step))
+            #         if step > 0:
+            #             self._auto_step_chunk = step
+            #
+            #         # 如果需要步进，不要再往下走
+            #         continue
+            #
+            #     # 丢进处理线程
+            #     for i in range(self._channel):
+            #         self._channel_data_queue[i].put(
+            #             _src_data[i::self._channel])
+            # except Exception as e:
+            #     self._pyaudio_ok = False
+            #     print("Sonar _read error. err=%s" % (str(e)))
+            #     break
 
-                    # 如果需要步进，不要再往下走
-                    continue
-
-                # 丢进处理线程
-                for i in range(self._channel):
-                    self._channel_data_queue[i].put(
-                        _src_data[i::self._channel])
-            except Exception as e:
-                self._pyaudio_ok = False
-                print("Sonar _read error. err=%s" % (str(e)))
-                break
 
     def _handle_data(self, index):
         _times = 0  # 统计次数
         hil_data_list = np.zeros(
-            (self._overlay_max_count, self._chunk), dtype=float)  # 最近的包络数据
+            (self._overlay_max_count, self._chunk), dtype=float)  # 最近的包络数据  zeros(100行,96000列)
 
         val_index_list = np.zeros(
             (self._overlay_max_count, self._chunk), dtype=np.int32)  # 最近的val_index
@@ -466,7 +487,7 @@ class Sonar:
 
         while True:
             # 叠加次数
-            _overlay_count = configIns.sonar.overlay_count
+            _overlay_count = configIns.sonar.overlay_count      # 在config.py上调节叠加次数
 
             # 从队列中获取音频数据，阻塞操作
             src_data = self._channel_data_queue[index].get(1)
@@ -482,7 +503,7 @@ class Sonar:
             _follow_val = -1
             _follow_val_index = -1
             _gps_time = 0
-            if index == 1:
+            if index == 1:      # 对GPS通道做处理的
                 # GPS
                 # 解析出时间信息
                 print("------ ----- ----- -----")
@@ -517,22 +538,28 @@ class Sonar:
                 # 水听器
                 # 带通
                 bp_data = signal.filtfilt(self._bp_b, self._bp_a, src_data)
-
+                '''bp_data是带通之后的 之前之后分别画频谱FFT'''
                 # 包络
                 hil_bp_data = hilbert(bp_data)
                 uphil_bp_data = np.sqrt(bp_data ** 2 + hil_bp_data ** 2)
-
+                '''hil_bp_data是带通之后的 分别画频谱FFT'''
                 # 存储包络数据
                 hil_data_list[list_index] = uphil_bp_data
 
                 # 叠加
                 for i in range(_overlay_count):
-                    overlay_data += hil_data_list[i]
+                    overlay_data += hil_data_list[i]        # overlay_data叠加10次的数据
 
                 # 计算捕获特征信号的位置
                 _val_index = np.argmax(overlay_data)
                 _val = overlay_data[_val_index]
+                # ----------------------------------------------------- 丢进待画图的队列
+                pecture_data = Result_darw(src_data, bp_data, uphil_bp_data, overlay_data)
+                self._draw_que.put(pecture_data)
 
+
+
+                # -----------------------------------------------------
                 # 计算捕获特征信号的位置（跟随算法）
                 follow_index = configIns.sonar.follow_index
                 if follow_index > 0 and follow_index <= 96000:
@@ -890,6 +917,9 @@ class Sonar:
     def get(self):
         return self._data
 
+    def draw(self):
+        while True:
+            self._read()
 
 def FFT(Fs, data):
     L = len(data)
@@ -922,5 +952,19 @@ class Result(object):
         return self._channel_id, self._data_id, self._val_index, self._val, self._follow_val_index, self._follow_val, self._gps_time
 
 
+class Result_darw(object):
+    _src_data = 0       # 原始数据
+    _bp_data = 0        # 带通之后的
+    _uphil_bp_data = 0  # 包络之后的
+    _overlay_data = 0    # 十次包络后的
+    index = 0   # 样本标号
+    _pps = 0 # 把pps通道也放进来
+    _val_index = 0
+    _val = 0
 
-#
+
+    def __init__(self, src_data=0, bp_data=0, uphil_bp_data=0, overlay_data=0):
+        self._src_data = src_data
+        self._bp_data = bp_data
+        self._uphil_bp_data = uphil_bp_data
+        self._overlay_data = overlay_data
